@@ -3,6 +3,10 @@ name: Render Trading Video
 on:
   workflow_dispatch:
     inputs:
+      post_id:
+        description: "Post ID"
+        required: false
+        default: "POST"
       raw_text:
         description: "Raw Gemini text"
         required: false
@@ -48,6 +52,7 @@ jobs:
 
       - name: Render MP4
         env:
+          POST_ID: ${{ github.event.inputs.post_id }}
           RAW_TEXT: ${{ github.event.inputs.raw_text }}
           VIDEO_TITLE: ${{ github.event.inputs.title }}
           SCREEN_1: ${{ github.event.inputs.screen1 }}
@@ -60,8 +65,16 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          POST_ID: ${{ github.event.inputs.post_id }}
         run: |
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
             -F chat_id="${TELEGRAM_CHAT_ID}" \
             -F video="@out/video.mp4" \
-            -F caption="Роман, готов AI-video MP4 на проверку."
+            -F caption="ID: ${POST_ID}
+
+Роман, готов AI-video MP4 на проверку.
+
+Напиши:
+Да, публикуй
+или
+Переделать"
