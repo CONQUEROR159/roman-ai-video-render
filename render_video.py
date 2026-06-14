@@ -148,13 +148,67 @@ def create_scene(text, scene_index, total_scenes):
     return path
 
 
+def extract_field(raw_text: str, field_name: str, fallback: str) -> str:
+    lines = raw_text.splitlines()
+    capture = False
+    collected = []
+
+    field_markers = [
+        "ЗАГОЛОВОК:",
+        "ЭКРАН 1:",
+        "ЭКРАН 2:",
+        "ЭКРАН 3:",
+        "ОЗВУЧКА:",
+        "ТЕКСТ ПОСТА:",
+        "CTA:",
+        "ВИДЕО СТИЛЬ:",
+    ]
+
+    target = field_name.upper()
+
+    for line in lines:
+        clean = line.strip()
+        upper = clean.upper()
+
+        if upper.startswith(target):
+            capture = True
+            value = clean.split(":", 1)[1].strip() if ":" in clean else ""
+            if value:
+                collected.append(value)
+            continue
+
+        if capture and any(upper.startswith(marker) for marker in field_markers):
+            break
+
+        if capture and clean:
+            collected.append(clean)
+
+    result = " ".join(collected).strip()
+    return result if result else fallback
+
+
+def shorten(text: str, max_len: int = 80) -> str:
+    text = " ".join(text.split())
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rsplit(" ", 1)[0] + "..."
+
+
 def main():
     os.makedirs(FRAMES_DIR, exist_ok=True)
 
-    title = os.getenv("VIDEO_TITLE", "Почему я не зашёл в сделку")
-    screen1 = os.getenv("SCREEN_1", "Движение было красивое")
-    screen2 = os.getenv("SCREEN_2", "Но подтверждения не было")
-    screen3 = os.getenv("SCREEN_3", "Лучше пропустить, чем зайти в ловушку")
+    raw_text = os.getenv("RAW_TEXT", "")
+
+    if raw_text:
+        title = shorten(extract_field(raw_text, "ЗАГОЛОВОК:", "Почему я не зашёл в сделку"), 80)
+        screen1 = shorten(extract_field(raw_text, "ЭКРАН 1:", "Движение было красивое"), 75)
+        screen2 = shorten(extract_field(raw_text, "ЭКРАН 2:", "Но подтверждения не было"), 75)
+        screen3 = shorten(extract_field(raw_text, "ЭКРАН 3:", "Лучше пропустить, чем зайти в ловушку"), 75)
+    else:
+        title = os.getenv("VIDEO_TITLE", "Почему я не зашёл в сделку")
+        screen1 = os.getenv("SCREEN_1", "Движение было красивое")
+        screen2 = os.getenv("SCREEN_2", "Но подтверждения не было")
+        screen3 = os.getenv("SCREEN_3", "Лучше пропустить, чем зайти в ловушку")
 
     scenes = [title, screen1, screen2, screen3]
 
