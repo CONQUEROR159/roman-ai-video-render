@@ -2,8 +2,8 @@ name: Render Trading Video
 
 on:
   workflow_dispatch:
-    inputs:    
-    raw_text:
+    inputs:
+      raw_text:
         description: "Raw Gemini text"
         required: false
         default: ""
@@ -46,7 +46,7 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-            - name: Render MP4
+      - name: Render MP4
         env:
           RAW_TEXT: ${{ github.event.inputs.raw_text }}
           VIDEO_TITLE: ${{ github.event.inputs.title }}
@@ -64,4 +64,4 @@ jobs:
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
             -F chat_id="${TELEGRAM_CHAT_ID}" \
             -F video="@out/video.mp4" \
-            -F caption="Роман, готов первый AI-video MP4 на проверку."
+            -F caption="Роман, готов AI-video MP4 на проверку."
