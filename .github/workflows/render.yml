@@ -13,19 +13,19 @@ on:
         default: ""
       title:
         description: "Video title"
-        required: true
+        required: false
         default: "Почему я не зашёл в сделку"
       screen1:
         description: "Screen 1"
-        required: true
+        required: false
         default: "Движение было красивое"
       screen2:
         description: "Screen 2"
-        required: true
+        required: false
         default: "Но подтверждения не было"
       screen3:
         description: "Screen 3"
-        required: true
+        required: false
         default: "Лучше пропустить, чем зайти в ловушку"
 
 jobs:
