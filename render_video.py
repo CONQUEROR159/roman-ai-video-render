@@ -1,21 +1,23 @@
+import math
 import os
+import shutil
 import subprocess
 from PIL import Image, ImageDraw, ImageFont
 
 
 WIDTH = 1080
 HEIGHT = 1920
-FPS = 30
-SECONDS_PER_SCENE = 5
+FPS = 18
+SECONDS_PER_SCENE = 4
 
 OUT_DIR = "out"
 FRAMES_DIR = os.path.join(OUT_DIR, "frames")
 VIDEO_PATH = os.path.join(OUT_DIR, "video.mp4")
 
 
-def get_font(size: int):
+def get_font(size: int, bold: bool = True):
     paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
 
@@ -24,6 +26,10 @@ def get_font(size: int):
             return ImageFont.truetype(path, size)
 
     return ImageFont.load_default()
+
+
+def ease_out_cubic(x: float) -> float:
+    return 1 - pow(1 - x, 3)
 
 
 def extract_field(raw_text: str, field_name: str, fallback: str) -> str:
@@ -65,25 +71,14 @@ def extract_field(raw_text: str, field_name: str, fallback: str) -> str:
     return result if result else fallback
 
 
-def shorten(text: str, max_len: int = 80) -> str:
+def shorten(text: str, max_len: int = 82) -> str:
     text = " ".join(text.split())
-
     if len(text) <= max_len:
         return text
-
     return text[:max_len].rsplit(" ", 1)[0] + "..."
 
 
-def draw_wrapped_text(
-    draw,
-    text,
-    font,
-    x,
-    y,
-    max_width,
-    line_spacing=18,
-    fill=(255, 255, 255),
-):
+def wrap_text_by_width(draw, text, font, max_width):
     words = text.split()
     lines = []
     current = ""
@@ -102,292 +97,380 @@ def draw_wrapped_text(
     if current:
         lines.append(current)
 
+    return lines
+
+
+def draw_center_text(
+    draw,
+    text,
+    font,
+    center_x,
+    center_y,
+    max_width,
+    fill=(255, 255, 255),
+    shadow=True,
+    line_spacing=20,
+):
+    lines = wrap_text_by_width(draw, text, font, max_width)
+
+    line_heights = []
     total_height = 0
-    for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        total_height += (bbox[3] - bbox[1]) + line_spacing
-
-    start_y = y - total_height // 2
 
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
-        line_width = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        line_heights.append(h)
+        total_height += h + line_spacing
 
-        draw.text(
-            (x - line_width // 2, start_y),
-            line,
-            font=font,
-            fill=fill,
-        )
+    total_height -= line_spacing
+    y = center_y - total_height // 2
 
-        start_y += (bbox[3] - bbox[1]) + line_spacing
+    for idx, line in enumerate(lines):
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w = bbox[2] - bbox[0]
+        x = center_x - w // 2
+
+        if shadow:
+            draw.text((x + 4, y + 5), line, font=font, fill=(0, 0, 0))
+
+        draw.text((x, y), line, font=font, fill=fill)
+        y += line_heights[idx] + line_spacing
 
 
-def make_background(draw):
-    # Основной тёмный фон
-    draw.rectangle((0, 0, WIDTH, HEIGHT), fill=(8, 10, 18))
+def draw_rounded_panel(draw, xy, radius, fill, outline=None, width=3):
+    draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
 
-    # Сетка как на терминале
-    grid_color = (25, 30, 45)
 
-    for x in range(0, WIDTH, 90):
-        draw.line((x, 0, x, HEIGHT), fill=grid_color, width=1)
+def draw_terminal_background(draw, frame_index, scene_index):
+    draw.rectangle((0, 0, WIDTH, HEIGHT), fill=(6, 8, 15))
 
-    for y in range(0, HEIGHT, 90):
-        draw.line((0, y, WIDTH, y), fill=grid_color, width=1)
+    # moving terminal grid
+    grid_color = (24, 30, 48)
+    shift = (frame_index * 2) % 90
 
-    # Фейковый график свечей
+    for x in range(-90, WIDTH + 90, 90):
+        draw.line((x + shift, 0, x + shift, HEIGHT), fill=grid_color, width=1)
+
+    for y in range(-90, HEIGHT + 90, 90):
+        draw.line((0, y + shift, WIDTH, y + shift), fill=grid_color, width=1)
+
+    # neon glows
+    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+
+    glow_green = (20, 220, 130, 35)
+    glow_red = (240, 70, 70, 25)
+    glow_blue = (60, 130, 255, 22)
+
+    pulse = int(30 * math.sin(frame_index / 12))
+
+    od.ellipse((-180, 220 + pulse, 420, 820 + pulse), fill=glow_blue)
+    od.ellipse((720, 1120 - pulse, 1320, 1720 - pulse), fill=glow_green)
+
+    if scene_index % 2 == 0:
+        od.ellipse((680, 230, 1260, 820), fill=glow_red)
+
+    base = Image.alpha_composite(draw.im.convert("RGBA"), overlay)
+    draw.im.paste(base.convert("RGB"))
+
+    # fake animated candle chart
     green = (20, 220, 130)
     red = (240, 70, 70)
+    muted_green = (12, 110, 75)
+    muted_red = (130, 40, 45)
 
-    base_y = 1350
-    x = 80
+    base_y = 1350 + int(25 * math.sin(frame_index / 18))
+    x = 60 - (frame_index * 3 % 80)
 
     candles = [
-        (60, -90, green),
-        (60, 80, red),
-        (60, -130, green),
-        (60, -50, green),
-        (60, 120, red),
-        (60, -170, green),
-        (60, 60, red),
-        (60, -80, green),
-        (60, -140, green),
-        (60, 110, red),
-        (60, -180, green),
-        (60, -60, green),
+        (54, -90, green),
+        (54, 80, red),
+        (54, -130, green),
+        (54, -50, green),
+        (54, 120, red),
+        (54, -170, green),
+        (54, 60, red),
+        (54, -80, green),
+        (54, -140, green),
+        (54, 110, red),
+        (54, -180, green),
+        (54, -60, green),
+        (54, 90, red),
+        (54, -120, green),
+        (54, 70, red),
     ]
 
     y = base_y
 
-    for w, move, color in candles:
+    for i, (w, move, color) in enumerate(candles):
         open_y = y
         close_y = y + move
-        high_y = min(open_y, close_y) - 50
-        low_y = max(open_y, close_y) + 50
+        high_y = min(open_y, close_y) - 45
+        low_y = max(open_y, close_y) + 45
 
-        cx = x + w // 2
+        current_x = x + i * 76
+        if current_x < -70 or current_x > WIDTH + 70:
+            y = close_y
+            continue
 
-        draw.line((cx, high_y, cx, low_y), fill=color, width=6)
+        cx = current_x + w // 2
+
+        wick_color = color
+        body_color = color
+
+        if current_x < 80:
+            wick_color = muted_green if color == green else muted_red
+            body_color = wick_color
+
+        draw.line((cx, high_y, cx, low_y), fill=wick_color, width=5)
 
         top = min(open_y, close_y)
         bottom = max(open_y, close_y)
 
         draw.rounded_rectangle(
-            (x, top, x + w, bottom),
+            (current_x, top, current_x + w, bottom),
             radius=8,
-            fill=color,
+            fill=body_color,
         )
 
         y = close_y
-        x += 80
+
+    # price line
+    price_y = 1135 + int(18 * math.sin(frame_index / 15))
+    draw.line((70, price_y, WIDTH - 70, price_y), fill=(20, 220, 130), width=2)
+    draw.rounded_rectangle((770, price_y - 30, WIDTH - 70, price_y + 30), radius=18, fill=(20, 220, 130))
+    draw.text((795, price_y - 22), "LIVE MARKET", font=get_font(30), fill=(5, 10, 16))
 
 
-def create_scene(text, scene_index, total_scenes):
-    img = Image.new("RGB", (WIDTH, HEIGHT), (8, 10, 18))
+def draw_top_badges(draw, post_id):
+    badge_font = get_font(34)
+
+    draw_rounded_panel(
+        draw,
+        (60, 72, 510, 145),
+        radius=28,
+        fill=(15, 22, 38),
+        outline=(38, 56, 82),
+        width=2,
+    )
+    draw.text((88, 92), "LIVE TRADING", font=badge_font, fill=(20, 220, 130))
+
+    draw_rounded_panel(
+        draw,
+        (660, 72, WIDTH - 60, 145),
+        radius=28,
+        fill=(15, 22, 38),
+        outline=(38, 56, 82),
+        width=2,
+    )
+    draw.text((690, 92), post_id[:18], font=badge_font, fill=(255, 255, 255))
+
+
+def draw_progress(draw, scene_index, total_scenes, local_progress):
+    bar_x = 70
+    bar_y = 1590
+    bar_w = WIDTH - 140
+    bar_h = 16
+
+    draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + bar_h), radius=8, fill=(38, 46, 68))
+
+    full_progress = (scene_index + local_progress) / total_scenes
+    filled = int(bar_w * full_progress)
+
+    draw.rounded_rectangle((bar_x, bar_y, bar_x + filled, bar_y + bar_h), radius=8, fill=(20, 220, 130))
+
+
+def draw_scene(frame_index, scene_index, total_scenes, label, text, post_id):
+    img = Image.new("RGB", (WIDTH, HEIGHT), (6, 8, 15))
     draw = ImageDraw.Draw(img)
 
-    make_background(draw)
+    draw_terminal_background(draw, frame_index, scene_index)
+    draw_top_badges(draw, post_id)
 
-    title_font = get_font(78)
-    small_font = get_font(42)
-    badge_font = get_font(36)
+    frames_per_scene = FPS * SECONDS_PER_SCENE
+    local_frame = frame_index % frames_per_scene
+    local_progress = local_frame / max(frames_per_scene - 1, 1)
+    eased = ease_out_cubic(local_progress)
 
-    post_id = os.getenv("POST_ID", "POST")
+    accent = (20, 220, 130)
+    if scene_index == 0:
+        accent = (255, 255, 255)
+    elif scene_index == 2:
+        accent = (255, 74, 74)
+    elif scene_index == total_scenes - 1:
+        accent = (20, 220, 130)
 
-    # Верхний бейдж LIVE TRADING
-    draw.rounded_rectangle(
-        (70, 90, 520, 155),
-        radius=28,
+    # label
+    label_font = get_font(38)
+    draw_rounded_panel(
+        draw,
+        (70, 250, 450, 318),
+        radius=30,
         fill=(18, 24, 38),
+        outline=accent,
+        width=3,
+    )
+    draw.text((100, 268), label.upper(), font=label_font, fill=accent)
+
+    # main animated panel
+    panel_y = int(420 + (1 - eased) * 90)
+    panel_bottom = panel_y + 600
+
+    draw_rounded_panel(
+        draw,
+        (60, panel_y, WIDTH - 60, panel_bottom),
+        radius=54,
+        fill=(12, 17, 31),
+        outline=(42, 54, 82),
+        width=3,
     )
 
-    draw.text(
-        (95, 105),
-        "LIVE TRADING",
-        font=badge_font,
-        fill=(20, 220, 130),
-    )
-
-    # Бейдж ID поста справа
+    # inner accent line
     draw.rounded_rectangle(
-        (690, 90, WIDTH - 70, 155),
-        radius=28,
-        fill=(18, 24, 38),
+        (88, panel_y + 28, 105, panel_bottom - 28),
+        radius=8,
+        fill=accent,
     )
 
-    draw.text(
-        (720, 105),
-        post_id[:18],
-        font=badge_font,
-        fill=(255, 255, 255),
-    )
+    # big text
+    text_font_size = 82 if scene_index == 0 else 74
+    if scene_index == total_scenes - 1:
+        text_font_size = 66
 
-    # Главный текстовый блок
-    draw.rounded_rectangle(
-        (70, 430, WIDTH - 70, 980),
-        radius=48,
-        fill=(13, 18, 32),
-    )
-
-    draw_wrapped_text(
+    text_font = get_font(text_font_size)
+    draw_center_text(
         draw=draw,
         text=text.upper(),
-        font=title_font,
-        x=WIDTH // 2,
-        y=705,
-        max_width=850,
-        line_spacing=24,
+        font=text_font,
+        center_x=WIDTH // 2 + 20,
+        center_y=panel_y + 305,
+        max_width=800,
         fill=(255, 255, 255),
+        shadow=True,
+        line_spacing=24,
     )
 
-    # Индикатор экранов
-    dot_y = 1090
-    start_x = WIDTH // 2 - (total_scenes * 34) // 2
+    # lower slogan
+    micro_font = get_font(31, bold=False)
+    draw.text((90, 1220), "NO GUARANTEES • NO SIGNALS • ONLY LIVE LOGIC", font=micro_font, fill=(120, 132, 158))
 
-    for i in range(total_scenes):
-        color = (20, 220, 130) if i == scene_index else (80, 90, 110)
-
-        draw.ellipse(
-            (
-                start_x + i * 34,
-                dot_y,
-                start_x + i * 34 + 16,
-                dot_y + 16,
-            ),
-            fill=color,
-        )
-
-    # Нижний CTA
-    draw.rounded_rectangle(
-        (70, 1650, WIDTH - 70, 1780),
-        radius=40,
-        fill=(18, 24, 38),
+    # bottom CTA panel
+    draw_rounded_panel(
+        draw,
+        (60, 1640, WIDTH - 60, 1805),
+        radius=46,
+        fill=(15, 22, 38),
+        outline=(38, 56, 82),
+        width=2,
     )
 
-    draw_wrapped_text(
+    cta_font = get_font(42)
+    draw_center_text(
         draw=draw,
         text="БОЛЬШЕ LIVE-РАЗБОРОВ — В TELEGRAM @DERZKIYBAFFET",
-        font=small_font,
-        x=WIDTH // 2,
-        y=1715,
-        max_width=870,
-        line_spacing=12,
+        font=cta_font,
+        center_x=WIDTH // 2,
+        center_y=1722,
+        max_width=880,
         fill=(255, 255, 255),
+        shadow=False,
+        line_spacing=12,
     )
 
-    path = os.path.join(FRAMES_DIR, f"scene_{scene_index}.png")
-    img.save(path)
+    draw_progress(draw, scene_index, total_scenes, local_progress)
 
-    return path
+    return img
 
 
-def main():
+def build_video(scenes, post_id):
+    if os.path.exists(OUT_DIR):
+        shutil.rmtree(OUT_DIR)
+
     os.makedirs(FRAMES_DIR, exist_ok=True)
 
-    raw_text = os.getenv("RAW_TEXT", "")
+    frame_counter = 0
+    total_scenes = len(scenes)
 
-    if raw_text:
-        title = shorten(
-            extract_field(
-                raw_text,
-                "ЗАГОЛОВОК:",
-                "Почему я не зашёл в сделку",
-            ),
-            80,
-        )
+    for scene_index, scene in enumerate(scenes):
+        label = scene["label"]
+        text = scene["text"]
 
-        screen1 = shorten(
-            extract_field(
-                raw_text,
-                "ЭКРАН 1:",
-                "Движение было красивое",
-            ),
-            75,
-        )
+        for frame_in_scene in range(FPS * SECONDS_PER_SCENE):
+            global_frame = scene_index * FPS * SECONDS_PER_SCENE + frame_in_scene
 
-        screen2 = shorten(
-            extract_field(
-                raw_text,
-                "ЭКРАН 2:",
-                "Но подтверждения не было",
-            ),
-            75,
-        )
-
-        screen3 = shorten(
-            extract_field(
-                raw_text,
-                "ЭКРАН 3:",
-                "Лучше пропустить, чем зайти в ловушку",
-            ),
-            75,
-        )
-    else:
-        title = os.getenv(
-            "VIDEO_TITLE",
-            "Почему я не зашёл в сделку",
-        )
-
-        screen1 = os.getenv(
-            "SCREEN_1",
-            "Движение было красивое",
-        )
-
-        screen2 = os.getenv(
-            "SCREEN_2",
-            "Но подтверждения не было",
-        )
-
-        screen3 = os.getenv(
-            "SCREEN_3",
-            "Лучше пропустить, чем зайти в ловушку",
-        )
-
-    scenes = [title, screen1, screen2, screen3]
-
-    scene_paths = []
-
-    for i, text in enumerate(scenes):
-        scene_paths.append(
-            create_scene(
+            img = draw_scene(
+                frame_index=global_frame,
+                scene_index=scene_index,
+                total_scenes=total_scenes,
+                label=label,
                 text=text,
-                scene_index=i,
-                total_scenes=len(scenes),
+                post_id=post_id,
             )
-        )
 
-    list_path = os.path.join(OUT_DIR, "inputs.txt")
-
-    with open(list_path, "w", encoding="utf-8") as f:
-        for path in scene_paths:
-            f.write(f"file '{os.path.abspath(path)}'\n")
-            f.write(f"duration {SECONDS_PER_SCENE}\n")
-
-        f.write(f"file '{os.path.abspath(scene_paths[-1])}'\n")
+            frame_path = os.path.join(FRAMES_DIR, f"frame_{frame_counter:05d}.jpg")
+            img.save(frame_path, quality=90, optimize=True)
+            frame_counter += 1
 
     subprocess.run(
         [
             "ffmpeg",
             "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
+            "-framerate",
+            str(FPS),
             "-i",
-            list_path,
+            os.path.join(FRAMES_DIR, "frame_%05d.jpg"),
             "-vf",
-            "fps=30,format=yuv420p",
+            "format=yuv420p",
             "-c:v",
             "libx264",
             "-pix_fmt",
             "yuv420p",
+            "-r",
+            str(FPS),
             VIDEO_PATH,
         ],
         check=True,
     )
 
     print(f"Video created: {VIDEO_PATH}")
+
+
+def main():
+    post_id = os.getenv("POST_ID", "POST")
+    raw_text = os.getenv("RAW_TEXT", "")
+
+    if raw_text:
+        title = shorten(
+            extract_field(raw_text, "ЗАГОЛОВОК:", "Почему я не зашёл в сделку"),
+            86,
+        )
+        screen1 = shorten(
+            extract_field(raw_text, "ЭКРАН 1:", "Цена дала движение"),
+            78,
+        )
+        screen2 = shorten(
+            extract_field(raw_text, "ЭКРАН 2:", "Но подтверждения не было"),
+            78,
+        )
+        screen3 = shorten(
+            extract_field(raw_text, "ЭКРАН 3:", "Лучше пропустить ловушку"),
+            78,
+        )
+    else:
+        title = os.getenv("VIDEO_TITLE", "Почему я не зашёл в сделку")
+        screen1 = os.getenv("SCREEN_1", "Цена дала движение")
+        screen2 = os.getenv("SCREEN_2", "Но подтверждения не было")
+        screen3 = os.getenv("SCREEN_3", "Лучше пропустить ловушку")
+
+    scenes = [
+        {"label": "Хук", "text": title},
+        {"label": "Факт 1", "text": screen1},
+        {"label": "Факт 2", "text": screen2},
+        {"label": "Вывод", "text": screen3},
+        {"label": "Telegram", "text": "Продолжение разбора — в Telegram"},
+    ]
+
+    build_video(scenes, post_id)
 
 
 if __name__ == "__main__":
