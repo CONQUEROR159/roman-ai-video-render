@@ -2,7 +2,11 @@ name: Render Trading Video
 
 on:
   workflow_dispatch:
-    inputs:
+    inputs:    
+    raw_text:
+        description: "Raw Gemini text"
+        required: false
+        default: ""
       title:
         description: "Video title"
         required: true
@@ -42,8 +46,9 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Render MP4
+            - name: Render MP4
         env:
+          RAW_TEXT: ${{ github.event.inputs.raw_text }}
           VIDEO_TITLE: ${{ github.event.inputs.title }}
           SCREEN_1: ${{ github.event.inputs.screen1 }}
           SCREEN_2: ${{ github.event.inputs.screen2 }}
