@@ -1,0 +1,62 @@
+name: Render Trading Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Video title"
+        required: true
+        default: "Почему я не зашёл в сделку"
+      screen1:
+        description: "Screen 1"
+        required: true
+        default: "Движение было красивое"
+      screen2:
+        description: "Screen 2"
+        required: true
+        default: "Но подтверждения не было"
+      screen3:
+        description: "Screen 3"
+        required: true
+        default: "Лучше пропустить, чем зайти в ловушку"
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python packages
+        run: |
+          pip install -r requirements.txt
+
+      - name: Render MP4
+        env:
+          VIDEO_TITLE: ${{ github.event.inputs.title }}
+          SCREEN_1: ${{ github.event.inputs.screen1 }}
+          SCREEN_2: ${{ github.event.inputs.screen2 }}
+          SCREEN_3: ${{ github.event.inputs.screen3 }}
+        run: |
+          python render_video.py
+
+      - name: Send video to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
+            -F chat_id="${TELEGRAM_CHAT_ID}" \
+            -F video="@out/video.mp4" \
+            -F caption="Роман, готов первый AI-video MP4 на проверку."
